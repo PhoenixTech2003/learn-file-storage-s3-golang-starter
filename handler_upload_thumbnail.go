@@ -4,7 +4,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -44,12 +48,20 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 
 	mediaType := header.Header.Get("Content-Type")
-	imageData, err := io.ReadAll(file)
+
+	fileType, _, err :=mime.ParseMediaType(mediaType)
 	if err != nil {
-		log.Printf("An error occured while reading image data %s", err)
-		respondWithError(w, http.StatusInternalServerError, "an error occured while parsing file", err)
+		log.Printf("an error occurd while parsing the media type %s",err)
+		respondWithError(w, http.StatusInternalServerError,"failed to parse file type",err)
 		return
 	}
+
+	if fileType != "image/jpeg" && fileType != "image/png"{
+		log.Println("uploaded incorrect file type")
+		respondWithError(w,http.StatusInternalServerError,"Please upload the correct file type",err)
+		return
+	}
+	
 	videoData, err := cfg.db.GetVideo(videoID)
 
 	if videoData.UserID != userID {
@@ -57,13 +69,20 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	videoThumbnail := thumbnail{
-		mediaType: mediaType,
-		data:      imageData,
-	}
 
-	videoThumbnails[videoID] = videoThumbnail
-	thumbnailUrl := fmt.Sprintf("http://localhost:%s/api/thumbnails/%s", cfg.port, videoID)
+	fileExtension := strings.Split(mediaType, "/")[1]
+	thumbnailFileName := fmt.Sprintf("%s.%s",videoID,fileExtension)
+	uploadFilePath := filepath.Join(cfg.assetsRoot,thumbnailFileName)
+	thumbnailUrl := fmt.Sprintf("http://localhost:%s/%s",cfg.port,uploadFilePath)
+	createdFile, err := os.Create(uploadFilePath)
+	if err != nil {
+		log.Printf("an error occured while creating the file upload path %s", err)
+		respondWithError(w, http.StatusInternalServerError,"an error occured while uploading the file",err)
+		return
+	}
+	io.Copy(createdFile,file)
+
+	
 	updateVideoParams := database.Video{
 		ID:           videoID,
 		UpdatedAt:    time.Now(),
